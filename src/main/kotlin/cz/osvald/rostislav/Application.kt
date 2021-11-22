@@ -69,7 +69,7 @@ fun Application.module() {
             }
             val token = JWT.create()
                 .withClaim("username", user.name)
-                .withExpiresAt(Date(System.currentTimeMillis() + 60000))
+                .withExpiresAt(Calendar.getInstance().apply { add(Calendar.DATE, 7) }.time)
                 .sign(Algorithm.HMAC256(environment.config.property("jwt.secret").getString()))
 
             call.respond(hashMapOf("token" to token))
