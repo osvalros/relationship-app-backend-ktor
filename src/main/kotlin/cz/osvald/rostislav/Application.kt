@@ -56,7 +56,6 @@ fun Application.module() {
                 Users.insert {
                     it[name] = user.name
                     it[password] = hash(user.password)
-                    it[created] = LocalDateTime.now()
                 }
             }
             call.respond(HttpStatusCode.OK, "User created")
