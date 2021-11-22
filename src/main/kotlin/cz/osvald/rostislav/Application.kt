@@ -1,21 +1,34 @@
 package cz.osvald.rostislav
 
+import com.auth0.jwt.JWT
+import com.auth0.jwt.algorithms.Algorithm
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import cz.osvald.rostislav.dto.UserCredentials
 import cz.osvald.rostislav.generated.Users
-import cz.osvald.rostislav.generated.Users.name
+import cz.osvald.rostislav.generated.Users.password
+import cz.osvald.rostislav.plugins.configureSecurity
+import cz.osvald.rostislav.plugins.configureSerialization
+import de.mkammerer.argon2.Argon2Factory
 import io.ktor.application.*
-import cz.osvald.rostislav.plugins.*
+import io.ktor.http.*
+import io.ktor.request.*
+import io.ktor.response.*
+import io.ktor.routing.*
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.Op
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.time.LocalDateTime
+import java.util.*
 
 fun main(args: Array<String>): Unit =
     io.ktor.server.netty.EngineMain.main(args)
 
 
-fun initDatabase(){
+fun initDatabase() {
     val hikariConfig = HikariConfig("db.properties")
     val dataSource = HikariDataSource(hikariConfig)
 
@@ -30,7 +43,38 @@ fun initDatabase(){
 fun Application.module() {
     initDatabase()
 
-    configureRouting()
+    val argon2 = Argon2Factory.create()
+    fun hash(password: String) = argon2.hash(22, 65536, 1, password.toCharArray())
+
     configureSecurity()
     configureSerialization()
+
+    routing {
+        post("/register") {
+            val user = call.receive<UserCredentials>()
+            transaction {
+                Users.insert {
+                    it[name] = user.name
+                    it[password] = hash(user.password)
+                    it[created] = LocalDateTime.now()
+                }
+            }
+            call.respond(HttpStatusCode.OK, "User created")
+        }
+        post("/login") {
+            val user = call.receive<UserCredentials>()
+            val databaseUser = transaction {
+                Users.select(Op.build { Users.name eq user.name }).limit(1).firstOrNull()
+            }
+            if (databaseUser == null || !argon2.verify(databaseUser[password], user.password.toCharArray())) {
+                call.respond(HttpStatusCode.Unauthorized, "Wrong name or password.")
+            }
+            val token = JWT.create()
+                .withClaim("username", user.name)
+                .withExpiresAt(Date(System.currentTimeMillis() + 60000))
+                .sign(Algorithm.HMAC256(environment.config.property("jwt.secret").getString()))
+
+            call.respond(hashMapOf("token" to token))
+        }
+    }
 }
