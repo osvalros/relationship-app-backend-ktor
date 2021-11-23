@@ -87,7 +87,26 @@ fun Application.module() {
             route("/movies") {
                 get {
                     call.respond(transaction {
-                        Movies.selectAll().map {
+                        Movies.selectAll().apply {
+                            val sortParam = call.request.queryParameters["sort"]
+                            sortParam?.split(",")?.map { sortExpressionString ->
+                                SortExpression.fromExpressionString(sortExpressionString)
+                            }?.forEach { sortExpression ->
+                                val column = when (sortExpression.column) {
+                                    "id" -> Movies.id
+                                    "createdAt" -> Movies.createdAt
+                                    "viewedAt" -> Movies.viewedAt
+                                    else -> return@forEach
+                                }
+                                orderBy(column, sortExpression.order)
+                            }
+                            val viewed = call.request.queryParameters["viewed"]?.toBoolean()
+                            viewed?.let {
+                                andWhere {
+                                    if (viewed) Movies.viewedAt neq null else Movies.viewedAt eq null
+                                }
+                            }
+                        }.map {
                             it.toMovie()
                         }
                     })
@@ -156,4 +175,17 @@ fun ApplicationCall.getLoggedUser(): User = transaction {
 } ?: runBlocking {
     this@getLoggedUser.respond(UnauthorizedResponse())
     throw UnauthorizedException()
+}
+
+
+data class SortExpression(val column: String, val order: SortOrder) {
+    companion object {
+        fun fromExpressionString(sortExpressionString: String) =
+            sortExpressionString.split(":", limit = 2).let {
+                SortExpression(
+                    it[0],
+                    if (it.getOrNull(1) == "desc") SortOrder.DESC_NULLS_LAST else SortOrder.ASC_NULLS_LAST
+                )
+            }
+    }
 }
