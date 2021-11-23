@@ -79,6 +79,11 @@ fun Application.module() {
             call.respond(hashMapOf("token" to token))
         }
         authenticate {
+            route("/users") {
+                get("/me") {
+                    call.respond(call.getLoggedUser())
+                }
+            }
             route("/movies") {
                 get {
                     call.respond(transaction {
