@@ -5,8 +5,10 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import cz.osvald.rostislav.dto.Movie
+import cz.osvald.rostislav.dto.Rating
 import cz.osvald.rostislav.dto.UserCredentials
 import cz.osvald.rostislav.generated.Movies
+import cz.osvald.rostislav.generated.Ratings
 import cz.osvald.rostislav.generated.Users
 import cz.osvald.rostislav.generated.Users.password
 import cz.osvald.rostislav.plugins.configureSecurity
@@ -147,6 +149,48 @@ fun Application.module() {
                         }
                         call.respond("Movie updated")
                     }
+                    route("ratings") {
+                        get {
+                            call.respond(
+                                transaction {
+                                    Ratings.selectAll().andWhere {
+                                        Ratings.movieId eq call.parameters["movieId"]!!.toInt()
+                                    }.map {
+                                        it.toRating()
+                                    }
+                                })
+                        }
+                        post {
+                            val rating = call.receive<Rating>()
+                            val loggedUser = call.getLoggedUser()
+                            val movieIdParam = call.parameters["movieId"]!!.toInt()
+                            val created = transaction {
+                                val whereRatingOnMovieFromLoggedUser = Op.build {
+                                    AndOp(
+                                        listOf(
+                                            Ratings.movieId eq movieIdParam,
+                                            Ratings.userId eq call.getLoggedUser().id
+                                        )
+                                    )
+                                }
+                                val ratingInDatabase = Ratings.selectOne(whereRatingOnMovieFromLoggedUser)
+                                if (ratingInDatabase == null) {
+                                    Ratings.insert {
+                                        it[value] = rating.value
+                                        it[movieId] = movieIdParam
+                                        it[userId] = loggedUser.id
+                                    }
+                                    return@transaction true
+                                } else {
+                                    Ratings.update({whereRatingOnMovieFromLoggedUser}) {
+                                        it[value] = rating.value
+                                    }
+                                    return@transaction false
+                                }
+                            }
+                            call.respond(if (created) "Rating created" else "Rating updated")
+                        }
+                    }
                 }
             }
         }
@@ -160,6 +204,15 @@ fun ResultRow.toMovie(): Movie {
         this[Movies.name],
         this[Movies.createdAt].toString(),
         this[Movies.viewedAt]?.toString()
+    )
+}
+
+fun ResultRow.toRating(): Rating {
+    return Rating(
+        this[Ratings.id].value,
+        this[Ratings.value],
+        this[Ratings.movieId],
+        this[Ratings.userId],
     )
 }
 
