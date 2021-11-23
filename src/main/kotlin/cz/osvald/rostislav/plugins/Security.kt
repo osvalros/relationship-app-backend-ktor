@@ -17,7 +17,7 @@ fun Application.configureSecurity() {
             )
 
             validate { credential ->
-                JWTPrincipal(credential.payload)
+                if (!credential.payload.getClaim("username").asString().isNullOrEmpty()) JWTPrincipal(credential.payload) else null
             }
         }
     }

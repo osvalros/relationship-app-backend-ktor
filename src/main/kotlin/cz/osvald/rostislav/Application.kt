@@ -14,13 +14,17 @@ import cz.osvald.rostislav.plugins.configureSerialization
 import de.mkammerer.argon2.Argon2Factory
 import io.ktor.application.*
 import io.ktor.auth.*
+import io.ktor.auth.jwt.*
 import io.ktor.http.*
 import io.ktor.request.*
 import io.ktor.response.*
 import io.ktor.routing.*
+import kotlinx.coroutines.runBlocking
 import org.flywaydb.core.Flyway
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.time.LocalDateTime
 import java.util.*
 
 fun main(args: Array<String>): Unit =
@@ -79,16 +83,72 @@ fun Application.module() {
                 get {
                     call.respond(transaction {
                         Movies.selectAll().map {
-                            Movie(
-                                it[Movies.id].value,
-                                it[Movies.name],
-                                it[Movies.createdAt].toString(),
-                                it[Movies.viewedAt]?.toString()
-                            )
+                            it.toMovie()
                         }
                     })
+                }
+                post {
+                    val movie = call.receive<Movie>()
+                    try {
+                        transaction {
+                            Movies.insert {
+                                it[name] = movie.name
+                                it[creatorId] = call.getLoggedUser().id
+                            }
+                        }
+                    } catch (e: ExposedSQLException) {
+                        call.respond(HttpStatusCode.BadRequest, "Failed to create movie (duplicate name?)")
+                    }
+                    call.respond("Movie created")
+                }
+                route("/{id}") {
+                    get {
+                        val movie = transaction {
+                            Movies.select(Op.build { Movies.id eq call.parameters["id"]!!.toInt() }).limit(1)
+                                .firstOrNull()
+                        }?.toMovie()
+                        if (movie == null) {
+                            call.respond(HttpStatusCode.NotFound, "Movie not found")
+                        } else {
+                            call.respond(movie)
+                        }
+                    }
+                    put {
+                        val movie = call.receive<Movie>()
+                        transaction {
+                            Movies.update({ Movies.id eq call.parameters["id"]!!.toInt() }) {
+                                it[name] = movie.name
+                                it[viewedAt] = movie.viewedAt?.let { it1 -> LocalDateTime.parse(it1) }
+                            }
+                        }
+                        call.respond("Movie updated")
+                    }
                 }
             }
         }
     }
+}
+
+
+fun ResultRow.toMovie(): Movie {
+    return Movie(
+        this[Movies.id].value,
+        this[Movies.name],
+        this[Movies.createdAt].toString(),
+        this[Movies.viewedAt]?.toString()
+    )
+}
+
+fun Table.selectOne(where: Op<Boolean>) = this.select(where).limit(1).firstOrNull()
+
+class UnauthorizedException : Exception("Unauthorized")
+
+fun ApplicationCall.getLoggedUser(): User = transaction {
+    val userName = this@getLoggedUser.principal<JWTPrincipal>()!!.payload.getClaim("username").asString()
+    Users.selectOne(Op.build { Users.name eq userName })?.let {
+        User(it[Users.id].value, it[Users.name])
+    }
+} ?: runBlocking {
+    this@getLoggedUser.respond(UnauthorizedResponse())
+    throw UnauthorizedException()
 }
