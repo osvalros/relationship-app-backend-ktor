@@ -101,10 +101,10 @@ fun Application.module() {
                     }
                     call.respond("Movie created")
                 }
-                route("/{id}") {
+                route("/{movieId}") {
                     get {
                         val movie = transaction {
-                            Movies.select(Op.build { Movies.id eq call.parameters["id"]!!.toInt() }).limit(1)
+                            Movies.select(Op.build { Movies.id eq call.parameters["movieId"]!!.toInt() }).limit(1)
                                 .firstOrNull()
                         }?.toMovie()
                         if (movie == null) {
@@ -116,7 +116,7 @@ fun Application.module() {
                     put {
                         val movie = call.receive<Movie>()
                         transaction {
-                            Movies.update({ Movies.id eq call.parameters["id"]!!.toInt() }) {
+                            Movies.update({ Movies.id eq call.parameters["movieId"]!!.toInt() }) {
                                 it[name] = movie.name
                                 it[viewedAt] = movie.viewedAt?.let { it1 -> LocalDateTime.parse(it1) }
                             }
